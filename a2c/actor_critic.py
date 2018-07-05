@@ -5,12 +5,18 @@ import torch.nn.functional as F
 from torch.distributions import Categorical
 
 from common import obesrvation_shape, device, Agent
-from utils import get_cumulative_rewards, generate_session
+from utils import get_cumulative_rewards, generate_session, generate_session_batch, get_total_rewards
+
+
+def reinforce_loss(logprobas, actions, rewards):
+    # select log-probabilities for chosen actions, log pi(a_i|s_i)
+    logprobas_for_actions = torch.sum(logprobas * to_one_hot(actions).to(torch.float), dim=1)
+    return torch.mean(-logprobas_for_actions * rewards)
 
 
 class ActorCritic(Agent):
     def __init__(self, observation_space, action_space, args):
-        self.model = MlpPolicy(observation_space, action_space).to(device)
+        self.model = MLPPolicy(observation_space, action_space).to(device)
         self.optimizer = torch.optim.Adam(self.model.parameters(), args.lr)
         self.gamma = args.gamma
         self.value_loss_coef = args.value_loss_coef
@@ -26,53 +32,51 @@ class ActorCritic(Agent):
         state_dict = checkpoint.get('state_dict', checkpoint)
         self.model.load_state_dict(state_dict)
 
-    def update(self, states, actions, rewards):
+    def update(self, states, actions, rewards, dones=None):
         states = torch.tensor(states).to(device, torch.float)
         actions = torch.tensor(actions).to(device, torch.float)
-        cumulative_returns = torch.tensor(get_cumulative_rewards(rewards, self.gamma)).to(device)
+        cumulative_returns = torch.tensor(get_cumulative_rewards(rewards, self.gamma, dones)).to(device)
 
         # predict logits, probas and log-probas using an agent.
         logits, values = self.model(states)
         probas = F.softmax(logits, dim=1)
         logprobas = F.log_softmax(logits, dim=1)
 
-        # select log-probabilities for chosen actions, log pi(a_i|s_i)
-        logprobas_for_actions = torch.sum(logprobas * to_one_hot(actions).to(torch.float), dim=1)
-
         # REINFORCE objective function
         self.optimizer.zero_grad()
         rewards_with_baseline = cumulative_returns - values.squeeze(1)
-        policy_loss = torch.mean(-logprobas_for_actions * rewards_with_baseline)
+        policy_loss = reinforce_loss(logprobas, actions, rewards_with_baseline)
         value_loss = F.smooth_l1_loss(values, cumulative_returns.unsqueeze(1))
         entropy = torch.mean(-torch.sum(logprobas * probas, dim=1))
         loss = policy_loss + self.value_loss_coef * value_loss + self.entropy_coef * entropy
         loss.backward()
         self.optimizer.step()
 
-        # technical: return session rewards to print them later
-        return np.sum(rewards)
+        return loss, policy_loss, value_loss, entropy
 
     def get_action(self, state):
         with torch.no_grad():
-            logits, _ = self.model(torch.tensor(state.reshape(1, -1)).to(device, torch.float))
+            logits, _ = self.model(torch.tensor(state).to(device, torch.float))
             dist = Categorical(F.softmax(logits, dim=1))
-            return dist.sample().item()
+            sample = dist.sample()
+            return sample.detach().cpu().numpy()
 
 
-class MlpPolicy(nn.Module):
+class MLPPolicy(nn.Module):
     def __init__(self, observation_space, action_space):
-        super(MlpPolicy, self).__init__()
+        super(MLPPolicy, self).__init__()
 
         self.model = nn.Sequential(
-            nn.Linear(*obesrvation_shape(observation_space), 50),
+            nn.Linear(*obesrvation_shape(observation_space), 64),
             nn.ReLU(),
-            # nn.Linear(50, 50),
-            # nn.ReLU(),
+            nn.Linear(64, 64),
+            nn.ReLU(),
         )
-        self.logits = nn.Linear(50, action_space.n)
-        self.state_values = nn.Linear(50, 1)
+        self.logits = nn.Linear(64, action_space.n)
+        self.state_values = nn.Linear(64, 1)
 
     def forward(self, x):
+        x = x.view(x.size(0), -1)
         x = self.model(x)
         return self.logits(x), self.state_values(x)
 
@@ -88,12 +92,22 @@ def to_one_hot(y, n_dims=None):
 def train(agent, env, args):
     total_rewars = []
     for i in range(args.num_steps):
-        states, actions, rewards = generate_session(agent, env, args.max_episode_length)
-        total_reward = agent.update(states, actions, rewards)
-        total_rewars.append(total_reward)
+        states, actions, rewards, dones = generate_session_batch(agent, env, args.episode_length)
+
+        # reshape sessions to form a batch
+        batch_size = env.num_envs * args.episode_length
+        states = states.reshape((batch_size,) + env.observation_space.shape)
+        actions = actions.reshape((batch_size,))
+        rewards = rewards.reshape((batch_size,))
+        dones = dones.reshape((batch_size,))
+
+        # update policy on a batch
+        losses = agent.update(states, actions, rewards, dones)
+        # note that last session reward is truncated
+        total_rewars.extend(get_total_rewards(rewards, dones))
 
         current_mean_reward = np.mean(total_rewars[-100:])
         if i % 100 == 0:
-            print("Iteration: %i, Mean reward:%.3f" % (i // 100, current_mean_reward))
+            print("Iteration: %i, Mean reward:%.3f" % (i, current_mean_reward))
             if current_mean_reward > 200:
                 return

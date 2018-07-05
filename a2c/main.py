@@ -22,10 +22,14 @@ def get_argparser():
                         help='random seed')
     parser.add_argument('--num-steps', type=int, default=int(1e4),
                         help='number of forward steps')
-    parser.add_argument('--max-episode-length', type=int, default=int(10e6),
+    parser.add_argument('--episode-length', type=int, default=int(256),
                         help='maximum length of an episode')
     parser.add_argument('--env', default='CartPole-v0',
                         help='environment to train on')
+    parser.add_argument('-j', '--num-processes', default=1,
+                        help='Number of environment processes')
+    parser.add_argument('--num-envs', default=1,
+                        help='Number of environment')
 
     return parser
 
@@ -34,7 +38,7 @@ def main():
     args = get_argparser().parse_args()
     init_logging('logs')
 
-    env = make_env(args.env, args.seed)
+    env = make_env(args.env, args.seed, num_envs=args.num_envs, num_processes=args.num_processes)
     agent = ActorCritic(env.observation_space, env.action_space, args)
     agent.save("checkpoint.pth")
 
