@@ -26,9 +26,9 @@ def get_argparser():
                         help='maximum length of an episode')
     parser.add_argument('--env', default='CartPole-v0',
                         help='environment to train on')
-    parser.add_argument('-j', '--num-processes', default=1,
+    parser.add_argument('-j', '--num-processes', default=1, type=int,
                         help='Number of environment processes')
-    parser.add_argument('--num-envs', default=1,
+    parser.add_argument('--num-envs', default=1, type=int,
                         help='Number of environment')
 
     return parser
