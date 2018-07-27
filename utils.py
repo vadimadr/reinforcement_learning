@@ -105,7 +105,7 @@ def make_fun(agent, env, record_video=False, render=True, n_episodes=1):
         state = env.reset()
         done = False
         total_reward = 0
-        while not done.all():
+        while not np.asarray(done).all():
             if render:
                 env.render()
             action = agent.get_action(state)

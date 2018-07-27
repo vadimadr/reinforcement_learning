@@ -56,7 +56,7 @@ class MultiEnvWrapper:
             buffered_envs = [make_buffered_env_wrapper(envs) for envs in env_dispatch]
 
             self.ps = [Process(target=worker, args=(work_remote, remote, CloudpickleWrapper(env_fn)))
-                for (work_remote, remote, env_fn) in zip(self.work_remotes, self.remotes, buffered_envs)]
+                       for (work_remote, remote, env_fn) in zip(self.work_remotes, self.remotes, buffered_envs)]
             for p in self.ps:
                 p.daemon = True  # if the main process crashes, we should not cause things to hang
                 p.start()
@@ -106,7 +106,7 @@ class MultiEnvWrapper:
 
     def close(self):
         if self.num_workers <= 1:
-            return
+            return self.envs.close()
         if self.closed:
             return
         if self.waiting:
@@ -123,7 +123,8 @@ class MultiEnvWrapper:
             return self.envs.render(mode=mode)
         for pipe in self.remotes:
             pipe.send(('render', None))
-        imgs = [pipe.recv() for pipe in self.remotes]
+        imgs = np.asarray([pipe.recv() for pipe in self.remotes])
+        imgs = imgs.reshape((-1, *imgs.shape[2:]))
         bigimg = tile_images(imgs)
         if mode == 'human':
             import cv2
@@ -179,6 +180,10 @@ class _BufferedMultiEnv:
 
     def render(self, mode='human'):
         return [e.render(mode=mode) for e in self.envs]
+
+    def close(self):
+        for e in self.envs:
+            e.close()
 
     def _save_obs(self, e, obs):
         for k in self.keys:

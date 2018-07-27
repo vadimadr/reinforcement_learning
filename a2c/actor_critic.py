@@ -71,18 +71,24 @@ class MLPPolicy(nn.Module):
     def __init__(self, observation_space, action_space):
         super(MLPPolicy, self).__init__()
 
-        self.model = nn.Sequential(
+        self.logits = nn.Sequential(
             nn.Linear(*obesrvation_shape(observation_space), 64),
             nn.ReLU(),
             nn.Linear(64, 64),
             nn.ReLU(),
+            nn.Linear(64, action_space.n)
         )
-        self.logits = nn.Linear(64, action_space.n)
-        self.state_values = nn.Linear(64, 1)
+
+        self.state_values = nn.Sequential(
+            nn.Linear(*obesrvation_shape(observation_space), 64),
+            nn.ReLU(),
+            nn.Linear(64, 64),
+            nn.ReLU(),
+            nn.Linear(64, 1)
+        )
 
     def forward(self, x):
         x = x.view(x.size(0), -1)
-        x = self.model(x)
         return self.logits(x), self.state_values(x)
 
 
@@ -96,7 +102,7 @@ def to_one_hot(y, n_dims=None):
 
 def train(agent, env, args, max_reward=200):
     total_rewars = []
-    for i in range(args.num_steps):
+    for i in range(1, args.num_steps + 1):
         states, actions, rewards, dones, lastvalues = generate_session_batch(agent, env, args.episode_length)
 
         # get cumulative rewards
@@ -120,5 +126,5 @@ def train(agent, env, args, max_reward=200):
         current_mean_reward = np.mean(total_rewars[-100:])
         if i % 100 == 0:
             print("Iteration: %i, Mean reward:%.3f" % (i, current_mean_reward))
-            if current_mean_reward > 200:
+            if current_mean_reward > max_reward:
                 return

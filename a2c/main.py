@@ -44,7 +44,9 @@ def main():
     agent = ActorCritic(env.observation_space, env.action_space, args)
 
     train(agent, env, args, max_reward=args.max_reward)
-    make_fun(agent, env, render=True)
+
+    test_env = make_env(args.env, args.seed, num_envs=1, num_processes=1)
+    make_fun(agent, test_env, render=True)
 
 
 if __name__ == '__main__':
