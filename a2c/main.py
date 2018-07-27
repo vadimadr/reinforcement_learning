@@ -30,6 +30,8 @@ def get_argparser():
                         help='Number of environment processes')
     parser.add_argument('--num-envs', default=1, type=int,
                         help='Number of environment')
+    parser.add_argument('--max-reward', default=200, type=int,
+                        help='Maximum reward before interrupting training')
 
     return parser
 
@@ -40,9 +42,8 @@ def main():
 
     env = make_env(args.env, args.seed, num_envs=args.num_envs, num_processes=args.num_processes)
     agent = ActorCritic(env.observation_space, env.action_space, args)
-    agent.save("checkpoint.pth")
 
-    train(agent, env, args)
+    train(agent, env, args, max_reward=args.max_reward)
     make_fun(agent, env, render=True)
 
 

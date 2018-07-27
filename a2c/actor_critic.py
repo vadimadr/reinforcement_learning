@@ -32,10 +32,10 @@ class ActorCritic(Agent):
         state_dict = checkpoint.get('state_dict', checkpoint)
         self.model.load_state_dict(state_dict)
 
-    def update(self, states, actions, rewards, dones=None):
+    def update(self, states, actions, cumulative_rewards, dones=None):
         states = torch.tensor(states).to(device, torch.float)
         actions = torch.tensor(actions).to(device, torch.float)
-        cumulative_returns = torch.tensor(get_cumulative_rewards(rewards, self.gamma, dones)).to(device)
+        cumulative_returns = torch.tensor(cumulative_rewards).to(device, torch.float)
 
         # predict logits, probas and log-probas using an agent.
         logits, values = self.model(states)
@@ -60,6 +60,11 @@ class ActorCritic(Agent):
             dist = Categorical(F.softmax(logits, dim=1))
             sample = dist.sample()
             return sample.detach().cpu().numpy()
+
+    def get_value(self, state):
+        with torch.no_grad():
+            _, values = self.model(torch.tensor(state).to(device, torch.float))
+            return values.detach().cpu().numpy()
 
 
 class MLPPolicy(nn.Module):
@@ -89,20 +94,26 @@ def to_one_hot(y, n_dims=None):
     return y_one_hot
 
 
-def train(agent, env, args):
+def train(agent, env, args, max_reward=200):
     total_rewars = []
     for i in range(args.num_steps):
-        states, actions, rewards, dones = generate_session_batch(agent, env, args.episode_length)
+        states, actions, rewards, dones, lastvalues = generate_session_batch(agent, env, args.episode_length)
+
+        # get cumulative rewards
+        # use fictive reward for handling unfinished sessions
+        rewards_ = np.c_[rewards, lastvalues]
+        dones_ = np.c_[dones, np.zeros(dones.shape[0])]
+        cumulative_rewards = get_cumulative_rewards(rewards_, agent.gamma, dones=dones_)[:, :-1]
 
         # reshape sessions to form a batch
         batch_size = env.num_envs * args.episode_length
         states = states.reshape((batch_size,) + env.observation_space.shape)
         actions = actions.reshape((batch_size,))
-        rewards = rewards.reshape((batch_size,))
+        cumulative_rewards = cumulative_rewards.reshape((batch_size,))
         dones = dones.reshape((batch_size,))
 
         # update policy on a batch
-        losses = agent.update(states, actions, rewards, dones)
+        losses = agent.update(states, actions, cumulative_rewards, dones)
         # note that last session reward is truncated
         total_rewars.extend(get_total_rewards(rewards, dones))
 

@@ -8,25 +8,34 @@ def get_cumulative_rewards(rewards, gamma=0.99, dones=None):
     compute cumulative returns (a.k.a. G(s,a) in Sutton '16)
     G_t = r_t + gamma*r_{t+1} + gamma^2*r_{t+2} + ...
     """
+    rewards = np.asarray(rewards)
     if dones is None:
-        dones = [False] * len(rewards)
+        dones = np.zeros(rewards.shape[-1])
+    dones = np.asarray(dones)
 
+    batch_size = rewards.shape[0] if len(rewards.shape) > 1 else 1
     cumulative_rewards = []
-    current_reward = 0
-    for r, done in zip(rewards[::-1], dones[::-1]):
-        # do mot discount if it is the last observation in a session
+    current_reward = np.zeros(batch_size)
+    for r, done in zip(rewards.T[::-1], dones.T[::-1]):
+        # do not discount if it is the last observation in a session
         current_reward = r + gamma * current_reward * (1 - done)
         cumulative_rewards.append(current_reward)
-    return cumulative_rewards[::-1]
+
+    return np.stack(cumulative_rewards[::-1], axis=1).reshape(rewards.shape)
 
 
 def get_total_rewards(rewards, dones):
     """
     Calculate total reward for all sessions in a batch
     """
+    rewards = np.asarray(rewards)
+    dones = np.array(dones)
+    dones = dones.reshape((-1, dones.shape[-1]))
+    dones[:, -1] = False
+
     total_rewards = []
     current_total_reward = 0
-    for reward, done in zip(rewards, dones):
+    for reward, done in zip(rewards.flat, dones.flat):
         current_total_reward += reward
         if done:
             total_rewards.append(current_total_reward)
@@ -82,9 +91,10 @@ def generate_session_batch(agent, envs, num_steps=32):
     actions = np.asarray(actions, dtype=np.int32).swapaxes(0, 1)
     rewards = np.asarray(rewards, dtype=np.float32).swapaxes(0, 1)
     dones = np.asarray(dones, dtype=bool).swapaxes(0, 1)
-    dones[:, -1] = True
 
-    return states, actions, rewards, dones
+    last_value = agent.get_value(s)
+
+    return states, actions, rewards, dones, last_value
 
 
 def make_fun(agent, env, record_video=False, render=True, n_episodes=1):
